@@ -1,0 +1,51 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "cmake",
+            "type": "shell",
+            "options": {
+                "cwd": "${workspaceRoot}/_build/r"
+            },
+            "command": "cmake",
+            "args": [
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-GNinja",
+                "${workspaceRoot}"
+            ]
+        },
+        {
+            "label": "build",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "type": "shell",
+            "command": "ninja-build",
+            "args": [
+                "install"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/_build/r"
+            }
+        },
+        {
+            "label": "jupyter",
+            "type": "shell",
+            "command": "jupyter",
+            "args": [
+                "lab",
+                "${workspaceFolder}/notebooks"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "PYTHONPATH": "${workspaceFolder}/_run/lib64:${env:PYTHONPATH}"
+                }
+            },
+            "problemMatcher": []
+        }
+    ]
+}
