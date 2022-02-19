@@ -54,7 +54,7 @@ PYBIND11_MODULE(pycc, m) {
       .def_readonly("lastTradeQty", &ngh::mkt::L2StateTracker::lastTradeQty)
       .def_readonly("lastTradeIsLiquidation",
                     &ngh::mkt::L2StateTracker::lastTradeIsLiquidation)
-      .def_readonly("orders", &ngh::mkt::L2StateTracker::orders);
+      .def_readwrite("orders", &ngh::mkt::L2StateTracker::orders);
 
   pybind11::class_<ngh::mkt::FtxHandler>(m_mkt, "FtxHandler")
       .def(pybind11::init<>())
