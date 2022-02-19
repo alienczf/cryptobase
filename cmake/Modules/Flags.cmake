@@ -25,8 +25,6 @@ add_compile_options(
   -Wno-ambiguous-reversed-operator
   "$<$<CONFIG:DEBUG>:-fno-omit-frame-pointer>"
   -Wcast-align
-  -march=${MARCH}
-  -mtune=${MTUNE}
   -Wno-unknown-warning-option
   -fno-ms-extensions
 

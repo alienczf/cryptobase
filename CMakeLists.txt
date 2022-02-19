@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.16.3)
 option(WITH_ASAN "Use address sanitizer" OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 

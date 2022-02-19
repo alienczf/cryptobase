@@ -37,8 +37,8 @@ RUN dnf -y install \
     ninja-build \
     boost-devel \
     python3-devel \
-    libxcb-devel \
     procps \
+    jq \
     vim
 
 # python
@@ -54,17 +54,18 @@ RUN ./configure \
 RUN make install
 RUN rm -rf /tmp/Python*
 
+# setup pyenv (less likely to change stuffs)
+WORKDIR /opt
+COPY . cryptobase
+RUN /opt/py39/bin/pip3 install --no-cache-dir -r ./cryptobase/requirements.txt
+RUN ls -lta cryptobase
+RUN /opt/py39/bin/pip3 install -e cryptobase
 
 # This user runs sshd, has sudo access for basic bootstrap of containers
 ENV UID 7999
 RUN groupadd sudo && \
     useradd -rm -d /home/centos -s /bin/bash -G wheel -l -u ${UID} centos && \
     echo "centos:centos" | chpasswd
-
-# setup pyenv (less likely to change stuffs)
-WORKDIR /home/centos/cryptobase
-COPY requirements.txt ./
-RUN /opt/py39/bin/pip3 install --no-cache-dir -r ./requirements.txt
 
 USER ${UID}
 WORKDIR /home/centos/cryptobase
