@@ -148,7 +148,6 @@ class FtxHandler {
  private:
   template <typename T>
   void onFill(T fill) {
-    std::cout << "got fill:" << fill << std::endl;
     const auto sign = (fill["side"] == "buy") ? 1 : -1;
     const auto qty = Qty(fill["size"]) * sign;
     const std::string mkt{std::string_view(fill["market"])};
@@ -159,6 +158,7 @@ class FtxHandler {
         .emplace(std::piecewise_construct, std::forward_as_tuple(base),
                  std::forward_as_tuple(0.))
         .first->second += qty;
+
     const auto paid =
         (offset != std::string::npos) ? mkt.substr(offset) : "USD";
     const auto ntl = qty * double(fill["price"]);
@@ -166,8 +166,12 @@ class FtxHandler {
         .emplace(std::piecewise_construct, std::forward_as_tuple(paid),
                  std::forward_as_tuple(0.))
         .first->second -= ntl;
-    // fill["fee"];
-    // fill["orderId"];
+
+    balances
+        .emplace(std::piecewise_construct,
+                 std::forward_as_tuple(std::string_view(fill["feeCurrency"])),
+                 std::forward_as_tuple(0.))
+        .first->second -= double(fill["fee"]);
     // fill["time"];
     // fill["type"];
     // fill["tradeId"];
