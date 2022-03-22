@@ -8,5 +8,5 @@ build
 .metadata
 
 venv
-data
+./data/
 notebooks
