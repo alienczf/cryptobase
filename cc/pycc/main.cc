@@ -59,6 +59,13 @@ PYBIND11_MODULE(pycc, m) {
 
   auto m_data = m_ngh.def_submodule("data");
   m_data.def("LoadQsBinFile", &ngh::data::LoadQsBinFile);
+  pybind11::class_<ngh::data::SortedBinLoader<ngh::mkt::QsHandler>>(
+      m_data, "SortedBinLoader")
+      .def(pybind11::init<>())
+      .def("LoadQsBinFile",
+           &ngh::data::SortedBinLoader<ngh::mkt::QsHandler>::LoadQsBinFile)
+      .def("RunTaskQueue",
+           &ngh::data::SortedBinLoader<ngh::mkt::QsHandler>::RunTaskQueue);
 }
 
 }  // namespace pycc

@@ -103,7 +103,7 @@ class BinLoader {
   DoneCb done_cb_;
 };
 
-std::stringstream LoadBin(const std::string& filename) {
+static std::stringstream LoadBin(const std::string& filename) {
   std::ifstream ifs(filename, std::ios::binary);
   if (!ifs) {
     throw std::runtime_error("failed to open file: " + filename);
@@ -119,7 +119,7 @@ std::stringstream LoadBin(const std::string& filename) {
 }
 
 template <typename T>
-boost::container::flat_map<UnixTimeMicro, std::function<void(T&)>>
+static boost::container::flat_map<UnixTimeMicro, std::function<void(T&)>>
 LoadQsTaskQueue(std::stringstream&& ss) {
   boost::container::flat_map<UnixTimeMicro, std::function<void(T&)>> task_queue;
   std::map<UnixTimeMicro, std::pair<std::vector<std::function<void(T&)>>,
@@ -157,15 +157,7 @@ LoadQsTaskQueue(std::stringstream&& ss) {
       for (auto& cb : v.second) {
         cb(qs);
       }
-      if (qs.levels[0].size() && qs.levels[1].size()) {
-        const auto bid = qs.levels[0].rbegin();
-        const auto ask = qs.levels[1].begin();
-        LOGINF("%d,%lu,%lu,%lu,%d,%lu,%f,%f,%f,%f,%f,%f", qs.seq_num,
-               qs.qs_send_time, qs.exch_time, qs.md_id,
-               qs.last_trade_maker_side, qs.last_trade_time, qs.last_trade_prc,
-               qs.last_trade_qty, bid->first, bid->second, ask->first,
-               ask->second);
-      }
+      qs.OnPacket();
     });
   }
   std::cout << "done loading packets:" << i << std::endl;
@@ -173,23 +165,31 @@ LoadQsTaskQueue(std::stringstream&& ss) {
   return task_queue;
 }
 
-void LoadQsBinFile(std::string fn) {
-  NanoLog::preallocate();
-  NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
-                                              : "/tmp/tmp.nanoclog");
-  const auto task_queue = LoadQsTaskQueue<mkt::QsHandler>(LoadBin(fn));
-  std::cout << "start playback:" << task_queue.size() << std::endl;
-  mkt::QsHandler qs_handler{};
-  LOGINF(
-      "seq_num,qs_send_time,exch_time,md_id,last_trade_maker_side,last_trade_"
-      "time,last_trade_prc,last_trade_qty,bid_prc,bid_qty,ask_prc,ask_qty");
-  for (auto& [_, cb] : task_queue) {
-    cb(qs_handler);
+template <typename T>
+class SortedBinLoader {
+ public:
+  void LoadQsBinFile(std::string fn) {
+    NanoLog::preallocate();
+    NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
+                                                : "/tmp/tmp.nanoclog");
+    task_queue_ = LoadQsTaskQueue<T>(LoadBin(fn));
   }
-  std::cout << "done playback" << std::endl;
-}
+  void RunTaskQueue() {
+    std::cout << "start playback:" << task_queue_.size() << std::endl;
+    T qs_handler{};
+    for (auto& [_, cb] : task_queue_) {
+      cb(qs_handler);
+    }
+    std::cout << "done playback" << std::endl;
+  }
 
-void LoadQsBinFileUnordered(std::string fn) {
+ private:
+  boost::container::flat_map<UnixTimeMicro,
+                             std::function<void(T&)>>
+      task_queue_;
+};
+
+static void LoadQsBinFile(std::string fn) {
   NanoLog::preallocate();
   NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
                                               : "/tmp/tmp.nanoclog");
@@ -232,65 +232,65 @@ void LoadQsBinFileUnordered(std::string fn) {
   std::cout << "read packets:" << i << std::endl;
 }
 
-void DumpQsBinFile(std::string fn) {
-  NanoLog::preallocate();
-  NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
-                                              : "/tmp/tmp.nanoclog");
-  auto decompressed = LoadBin(fn);
-  auto loader = BinLoader{
-      [](const Header& h) {
-        LOGINF(
-            "Header: size: %d, stype: %d, ts: %lu, version: %d, stream_type: "
-            "%d, exch: %d, symbol: %d, msg_type: %d, qs_type: %d",
-            h.size(), h.stype, h.ts, static_cast<int>(h.version.value),
-            static_cast<int>(h.stream_type.value), h.exch, h.symbol,
-            h.msg_type(), h.qs_type);
-      },
-      [](const bool isBid, const BookHdrV2& bh, const PriceLevelV2& pl) {
-        LOGINF(
-            "Book[%d] n_bids: %d, n_asks: %d, num_levels: %d, "
-            "qs_latency: %d, seqnum: %d, qs_send_time: %lu, exch_time: "
-            "%lu, md_id: %lu, prc: %f, qty: %f, cnt: %d",
-            isBid, bh.n_bids, bh.n_asks, bh.num_levels, bh.qs_latency,
-            bh.seqnum, bh.qs_send_time, bh.exch_time, bh.md_id, pl.prc, pl.qty,
-            pl.cnt);
-      },
-      [](const TradeV2& t) {
-        LOGINF(
-            "TradeV2: maker_side: %d, qs_latency: %d, qs_send_time: %lu, "
-            "exch_time: %lu, md_id: %lu, prc: %f, qty: %f",
-            t.maker_side, t.qs_latency, t.qs_send_time, t.exch_time, t.md_id,
-            t.prc, t.qty);
-      },
-      [](const TradeHdrV3& th, const TradeV3& t) {
-        LOGINF(
-            "TradeV3: maker_side: %d, qs_latency: %d, qs_send_time: %lu, "
-            "exch_time: %lu, md_id: %lu, prc: %f, qty: %f, n_trades: %d",
-            th.maker_side, th.qs_latency, th.qs_send_time, th.exch_time,
-            th.md_id, t.prc, t.qty, th.n_trades);
-      },
-      [](const FundingRateV3& fr) {
-        LOGINF(
-            "FundingRateV3: qs_latency: %d, qs_send_time: %lu, "
-            "exch_time: %lu, md_id: %lu, current_funding_rate: %f, "
-            "current_funding_time: %lu, next_funding_rate: %f, "
-            "next_funding_time: %lu, index_price: %f, mark_price: %f",
-            fr.qs_latency, fr.qs_send_time, fr.exch_time, fr.md_id,
-            fr.current_funding_rate, fr.current_funding_time,
-            fr.next_funding_rate, fr.next_funding_time, fr.index_price,
-            fr.mark_price);
-      },
-      [](char* buf, size_t sz) {
-        LOGWRN("Unknown message: size:%zu, %s", sz, buf);
-      },
-      []() { LOGDBG("end of packet"); }};
-  std::cout << "start:" << decompressed.eof() << std::endl;
-  size_t i = 0;
-  while (!decompressed.eof()) {
-    loader.LoadOne(decompressed);
-    ++i;
-  }
-  std::cout << "read packets:" << i << std::endl;
-}
+// static void DumpQsBinFile(std::string fn) {
+//   NanoLog::preallocate();
+//   NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
+//                                               : "/tmp/tmp.nanoclog");
+//   auto decompressed = LoadBin(fn);
+//   auto loader = BinLoader{
+//       [](const Header& h) {
+//         LOGINF(
+//             "Header: size: %d, stype: %d, ts: %lu, version: %d, stream_type: "
+//             "%d, exch: %d, symbol: %d, msg_type: %d, qs_type: %d",
+//             h.size(), h.stype, h.ts, static_cast<int>(h.version.value),
+//             static_cast<int>(h.stream_type.value), h.exch, h.symbol,
+//             h.msg_type(), h.qs_type);
+//       },
+//       [](const bool isBid, const BookHdrV2& bh, const PriceLevelV2& pl) {
+//         LOGINF(
+//             "Book[%d] n_bids: %d, n_asks: %d, num_levels: %d, "
+//             "qs_latency: %d, seqnum: %d, qs_send_time: %lu, exch_time: "
+//             "%lu, md_id: %lu, prc: %f, qty: %f, cnt: %d",
+//             isBid, bh.n_bids, bh.n_asks, bh.num_levels, bh.qs_latency,
+//             bh.seqnum, bh.qs_send_time, bh.exch_time, bh.md_id, pl.prc, pl.qty,
+//             pl.cnt);
+//       },
+//       [](const TradeV2& t) {
+//         LOGINF(
+//             "TradeV2: maker_side: %d, qs_latency: %d, qs_send_time: %lu, "
+//             "exch_time: %lu, md_id: %lu, prc: %f, qty: %f",
+//             t.maker_side, t.qs_latency, t.qs_send_time, t.exch_time, t.md_id,
+//             t.prc, t.qty);
+//       },
+//       [](const TradeHdrV3& th, const TradeV3& t) {
+//         LOGINF(
+//             "TradeV3: maker_side: %d, qs_latency: %d, qs_send_time: %lu, "
+//             "exch_time: %lu, md_id: %lu, prc: %f, qty: %f, n_trades: %d",
+//             th.maker_side, th.qs_latency, th.qs_send_time, th.exch_time,
+//             th.md_id, t.prc, t.qty, th.n_trades);
+//       },
+//       [](const FundingRateV3& fr) {
+//         LOGINF(
+//             "FundingRateV3: qs_latency: %d, qs_send_time: %lu, "
+//             "exch_time: %lu, md_id: %lu, current_funding_rate: %f, "
+//             "current_funding_time: %lu, next_funding_rate: %f, "
+//             "next_funding_time: %lu, index_price: %f, mark_price: %f",
+//             fr.qs_latency, fr.qs_send_time, fr.exch_time, fr.md_id,
+//             fr.current_funding_rate, fr.current_funding_time,
+//             fr.next_funding_rate, fr.next_funding_time, fr.index_price,
+//             fr.mark_price);
+//       },
+//       [](char* buf, size_t sz) {
+//         LOGWRN("Unknown message: size:%zu, %s", sz, buf);
+//       },
+//       []() { LOGDBG("end of packet"); }};
+//   std::cout << "start:" << decompressed.eof() << std::endl;
+//   size_t i = 0;
+//   while (!decompressed.eof()) {
+//     loader.LoadOne(decompressed);
+//     ++i;
+//   }
+//   std::cout << "read packets:" << i << std::endl;
+// }
 
 }  // namespace ngh::data

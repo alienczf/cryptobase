@@ -13,7 +13,11 @@ using namespace data::alc;
 class QsHandler {
  public:
   QsHandler(UnixTimeMicro trade_agg_window = 10000)
-      : trade_agg_window(trade_agg_window) {}
+      : trade_agg_window(trade_agg_window) {
+    LOGINF(
+        "seq_num,qs_send_time,exch_time,md_id,last_trade_maker_side,last_trade_"
+        "time,last_trade_prc,last_trade_qty,bid_prc,bid_qty,ask_prc,ask_qty");
+  }
 
   void OnLevel(const bool isBid, const data::alc::BookHdrV2& hdr,
                const data::alc::PriceLevelV2& lvl) {
@@ -111,6 +115,17 @@ class QsHandler {
         fr.qs_latency, fr.qs_send_time, fr.exch_time, fr.md_id,
         fr.current_funding_rate, fr.current_funding_time, fr.next_funding_rate,
         fr.next_funding_time, fr.index_price, fr.mark_price);
+  }
+
+  void OnPacket() {
+    if (levels[0].size() && levels[1].size()) {
+      const auto bid = levels[0].rbegin();
+      const auto ask = levels[1].begin();
+      LOGINF("%d,%lu,%lu,%lu,%d,%lu,%f,%f,%f,%f,%f,%f", seq_num, qs_send_time,
+             exch_time, md_id, last_trade_maker_side, last_trade_time,
+             last_trade_prc, last_trade_qty, bid->first, bid->second,
+             ask->first, ask->second);
+    }
   }
 
   // config
