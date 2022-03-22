@@ -14,18 +14,6 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Extra modules - this is apparently one of the standard locations to keep them
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 include(Compiler)
-project(cryptobase)
-
-include(Flags)  # Must come after project (project causes some magic to happen)
-include(Utils)  # comes after external libraries so that we can overwrite stuffs
-
-# external libraries
-add_definitions(-DBOOST_ALL_DYN_LINK)
-find_package(Boost COMPONENTS
-  log
-  program_options
-  REQUIRED
-  )
 
 # vendors stuffs
 include(FetchContent)
@@ -43,6 +31,26 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(pybind11)
 
+FetchContent_Declare(
+  NanoLog
+  GIT_REPOSITORY https://github.com/alienczf/NanoLog.git
+  GIT_TAG  tags/v0.0.1
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(NanoLog)
+
+project(cryptobase)
+
+include(Flags)  # Must come after project (project causes some magic to happen)
+include(Utils)  # comes after external libraries so that we can overwrite stuffs
+
+# external libraries
+add_definitions(-DBOOST_ALL_DYN_LINK)
+find_package(Boost COMPONENTS
+  log
+  program_options
+  iostreams
+  REQUIRED
+  )
 
 add_subdirectory(cc)
 set (CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/_run" CACHE PATH "default install path" FORCE)

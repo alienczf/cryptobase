@@ -67,6 +67,7 @@
         "codecvt": "cpp",
         "condition_variable": "cpp",
         "mutex": "cpp",
-        "thread": "cpp"
+        "thread": "cpp",
+        "bit": "cpp"
     }
 }

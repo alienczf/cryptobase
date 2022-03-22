@@ -14,35 +14,34 @@ add_definitions(
 )
 
 add_compile_options(
+  # We *always* want debug info, regardless what the cmake best practices tell you!
+  -g
+  "$<$<CONFIG:RELEASE>:-O3>"
+
+  -Werror  # all warnings are errors...
   -Wall
   -Wparentheses
   -Wextra
   -Wnull-dereference
   -Wdangling-else
+  -Wcast-align
+  -Wno-unknown-warning-option
   -Wno-unused-parameter
   -Wno-unused-result
   -Wno-missing-field-initializers
   -Wno-ambiguous-reversed-operator
-  "$<$<CONFIG:DEBUG>:-fno-omit-frame-pointer>"
-  -Wcast-align
-  -Wno-unknown-warning-option
-  -fno-ms-extensions
-
-  # Since we generate binary with different march and mtune now, we record the switches
-  # in the binary https://gcc.gnu.org/onlinedocs/gcc/Code-Gen-Options.html
-  -frecord-gcc-switches
-
-  # We *always* want debug info, regardless what the cmake best practices tell you!
-  -g
-  "$<$<CONFIG:RELEASE>:-O3>"
-
-  # all warnings are errors...
-  -Werror
+  -Wno-unused-parameter
+  -Wno-unused-result
   # ...but not unused variables warning, as they can get annoying in release builds because asserts
   # get compiled out
   "$<$<CONFIG:RELEASE>:-Wno-unused-variable>"
   "$<$<CONFIG:RELEASE>:-Wno-unused-const-variable>"
 
+  # Since we generate binary with different march and mtune now, we record the switches
+  # in the binary https://gcc.gnu.org/onlinedocs/gcc/Code-Gen-Options.html
+  -frecord-gcc-switches
+  -fno-ms-extensions
+  "$<$<CONFIG:DEBUG>:-fno-omit-frame-pointer>"
   # see http://gcc.gnu.org/wiki/Visibility
   $<$<COMPILE_LANGUAGE:CXX>:-fvisibility-inlines-hidden>
 
@@ -77,7 +76,7 @@ set(LINKER_FLAGS "-Wl,--disable-new-dtags ${LINKER_FLAGS}")
 
 # For debug builds use lld because it's much faster.
 set(LINKER_FLAGS_DEBUG "-fuse-ld=lld -Wl,--gdb-index -fno-lto ${LINKER_FLAGS_DEBUG}")
-set(LINKER_FLAGS_RELEASE "-g -fuse-ld=lld  -flto          ${LINKER_FLAGS_RELEASE}")
+set(LINKER_FLAGS_RELEASE "-fuse-ld=lld  -flto ${LINKER_FLAGS_RELEASE}")
 
 set(CMAKE_EXE_LINKER_FLAGS "${LINKER_FLAGS} ${CMAKE_EXE_LINKER_FLAGS}")
 set(CMAKE_SHARED_LINKER_FLAGS "${LINKER_FLAGS} ${CMAKE_SHARED_LINKER_FLAGS}")
@@ -88,6 +87,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "${LINKER_FLAGS_DEBUG} ${CMAKE_SHARED_LINKER
 set(CMAKE_MODULE_LINKER_FLAGS_DEBUG "${LINKER_FLAGS_DEBUG} ${CMAKE_MODULE_LINKER_FLAGS_DEBUG}")
 
 set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${LINKER_FLAGS_RELEASE} ${CMAKE_EXE_LINKER_FLAGS_RELEASE}")
+set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${LINKER_FLAGS_RELEASE} ${CMAKE_SHARED_LINKER_FLAGS_RELEASE}")
 set(CMAKE_MODULE_LINKER_FLAGS_RELEASE "${LINKER_FLAGS_RELEASE} ${CMAKE_MODULE_LINKER_FLAGS_RELEASE}")
 
 if(WITH_ASAN)

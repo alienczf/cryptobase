@@ -23,7 +23,7 @@
                 "isDefault": true
             },
             "type": "shell",
-            "command": "ninja-build",
+            "command": "ninja",
             "args": [
                 "install"
             ],
@@ -36,7 +36,7 @@
             "type": "shell",
             "command": "jupyter",
             "args": [
-                "lab",
+                "notebook",
                 "${workspaceFolder}/notebooks"
             ],
             "options": {

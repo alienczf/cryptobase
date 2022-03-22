@@ -1,6 +1,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 
+#include "ngh/data/qsbinhandler.h"
 #include "ngh/mkt/ftxhandler.h"
 #include "ngh/types/types.h"
 #include "pybind11/pybind11.h"
@@ -56,13 +57,8 @@ PYBIND11_MODULE(pycc, m) {
                     &ngh::mkt::L2StateTracker::lastTradeIsLiquidation)
       .def_readwrite("orders", &ngh::mkt::L2StateTracker::orders);
 
-  pybind11::class_<ngh::mkt::FtxHandler>(m_mkt, "FtxHandler")
-      .def(pybind11::init<>())
-      .def("reset", &ngh::mkt::FtxHandler::reset)
-      .def("onMessage", &ngh::mkt::FtxHandler::onMessage)
-      .def("getBook", &ngh::mkt::FtxHandler::getBook,
-           pybind11::return_value_policy::reference_internal)
-      .def_readwrite("balances", &ngh::mkt::FtxHandler::balances);
+  auto m_data = m_ngh.def_submodule("data");
+  m_data.def("LoadQsBinFile", &ngh::data::LoadQsBinFile);
 }
 
 }  // namespace pycc
