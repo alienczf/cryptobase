@@ -122,56 +122,54 @@ template <typename T>
 boost::container::flat_map<UnixTimeMicro, std::function<void(T&)>>
 LoadQsTaskQueue(std::stringstream&& ss) {
   boost::container::flat_map<UnixTimeMicro, std::function<void(T&)>> task_queue;
-  
-    std::map<UnixTimeMicro, std::pair<std::vector<std::function<void(T&)>>,
-                                      std::vector<std::function<void(T&)>>>>
-        cb_map;
-    auto loader = BinLoader{
-        [&](const Header& h) {},
-        [&](const bool isBid, const BookHdrV2& bh, const PriceLevelV2& pl) {
-          cb_map[bh.exch_time].second.push_back(
-              [=](T& qs) { qs.OnLevel(isBid, bh, pl); });
-        },
-        [&](const TradeV2& t) {
-          cb_map[t.exch_time].first.push_back([=](T& qs) { qs.OnTrade(t); });
-        },
-        [&](const TradeHdrV3& th, const TradeV3& t) {
-          cb_map[th.exch_time].first.push_back(
-              [=](T& qs) { qs.OnTrade(th, t); });
-        },
-        [](const FundingRateV3& fr) {},
-        [](char* buf, size_t sz) {
-          LOGWRN("Unknown message: size:%zu, %s", sz, buf);
-        },
-        [&]() {}};
+  std::map<UnixTimeMicro, std::pair<std::vector<std::function<void(T&)>>,
+                                    std::vector<std::function<void(T&)>>>>
+      cb_map;
+  auto loader = BinLoader{
+      [&](const Header& h) {},
+      [&](const bool isBid, const BookHdrV2& bh, const PriceLevelV2& pl) {
+        cb_map[bh.exch_time].second.push_back(
+            [=](T& qs) { qs.OnLevel(isBid, bh, pl); });
+      },
+      [&](const TradeV2& t) {
+        cb_map[t.exch_time].first.push_back([=](T& qs) { qs.OnTrade(t); });
+      },
+      [&](const TradeHdrV3& th, const TradeV3& t) {
+        cb_map[th.exch_time].first.push_back([=](T& qs) { qs.OnTrade(th, t); });
+      },
+      [](const FundingRateV3& fr) {},
+      [](char* buf, size_t sz) {
+        LOGWRN("Unknown message: size:%zu, %s", sz, buf);
+      },
+      [&]() {}};
 
-    std::cout << "loading callbacks:" << ss.eof() << std::endl;
-    size_t i = 0;
-    while (!ss.eof()) {
-      loader.LoadOne(ss);
-      ++i;
-    }
-    for (auto& [exchTs, v] : cb_map) {
-      task_queue.emplace(exchTs, [v = std::move(v)](T& qs) {
-        for (auto& cb : v.first) {
-          cb(qs);
-        }
-        for (auto& cb : v.second) {
-          cb(qs);
-        }
-        if (qs.levels[0].size() && qs.levels[1].size()) {
-          const auto bid = qs.levels[0].rbegin();
-          const auto ask = qs.levels[1].begin();
-          LOGINF("%d,%lu,%lu,%lu,%d,%lu,%f,%f,%f,%f,%f,%f", qs.seq_num,
-                 qs.qs_send_time, qs.exch_time, qs.md_id,
-                 qs.last_trade_maker_side, qs.last_trade_time,
-                 qs.last_trade_prc, qs.last_trade_qty, bid->first, bid->second,
-                 ask->first, ask->second);
-        }
-      });
-    }
-    std::cout << "done loading packets:" << i << std::endl;
-  
+  std::cout << "loading callbacks:" << ss.eof() << std::endl;
+  size_t i = 0;
+  while (!ss.eof()) {
+    loader.LoadOne(ss);
+    ++i;
+  }
+  for (auto& [exchTs, v] : cb_map) {
+    task_queue.emplace(exchTs, [v = std::move(v)](T& qs) {
+      for (auto& cb : v.first) {
+        cb(qs);
+      }
+      for (auto& cb : v.second) {
+        cb(qs);
+      }
+      if (qs.levels[0].size() && qs.levels[1].size()) {
+        const auto bid = qs.levels[0].rbegin();
+        const auto ask = qs.levels[1].begin();
+        LOGINF("%d,%lu,%lu,%lu,%d,%lu,%f,%f,%f,%f,%f,%f", qs.seq_num,
+               qs.qs_send_time, qs.exch_time, qs.md_id,
+               qs.last_trade_maker_side, qs.last_trade_time, qs.last_trade_prc,
+               qs.last_trade_qty, bid->first, bid->second, ask->first,
+               ask->second);
+      }
+    });
+  }
+  std::cout << "done loading packets:" << i << std::endl;
+
   return task_queue;
 }
 
