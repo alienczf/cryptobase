@@ -4,6 +4,7 @@
 #include <ngh/mkt/qshandler.h>
 #include <ngh/types/types.h>
 
+#include <boost/container/flat_map.hpp>
 #include <boost/iostreams/copy.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filtering_streambuf.hpp>
@@ -117,30 +118,26 @@ std::stringstream LoadBin(const std::string& filename) {
   return decompressed;
 }
 
-void LoadQsBinFile(std::string fn) {
-  NanoLog::preallocate();
-  NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
-                                              : "/tmp/tmp.nanoclog");
-  std::vector<std::function<void(mkt::QsHandler&)>> task_queue;
-  {  // logic to sort and load callbacks into task queue
-    auto decompressed = LoadBin(fn);
-    std::map<UnixTimeMicro,
-             std::pair<std::vector<std::function<void(mkt::QsHandler&)>>,
-                       std::vector<std::function<void(mkt::QsHandler&)>>>>
+template <typename T>
+boost::container::flat_map<UnixTimeMicro, std::function<void(T&)>>
+LoadQsTaskQueue(std::stringstream&& ss) {
+  boost::container::flat_map<UnixTimeMicro, std::function<void(T&)>> task_queue;
+  
+    std::map<UnixTimeMicro, std::pair<std::vector<std::function<void(T&)>>,
+                                      std::vector<std::function<void(T&)>>>>
         cb_map;
     auto loader = BinLoader{
         [&](const Header& h) {},
         [&](const bool isBid, const BookHdrV2& bh, const PriceLevelV2& pl) {
           cb_map[bh.exch_time].second.push_back(
-              [=](mkt::QsHandler& qs) { qs.OnLevel(isBid, bh, pl); });
+              [=](T& qs) { qs.OnLevel(isBid, bh, pl); });
         },
         [&](const TradeV2& t) {
-          cb_map[t.exch_time].first.push_back(
-              [=](mkt::QsHandler& qs) { qs.OnTrade(t); });
+          cb_map[t.exch_time].first.push_back([=](T& qs) { qs.OnTrade(t); });
         },
         [&](const TradeHdrV3& th, const TradeV3& t) {
           cb_map[th.exch_time].first.push_back(
-              [=](mkt::QsHandler& qs) { qs.OnTrade(th, t); });
+              [=](T& qs) { qs.OnTrade(th, t); });
         },
         [](const FundingRateV3& fr) {},
         [](char* buf, size_t sz) {
@@ -148,15 +145,14 @@ void LoadQsBinFile(std::string fn) {
         },
         [&]() {}};
 
-    std::cout << "loading callbacks:" << decompressed.eof() << std::endl;
+    std::cout << "loading callbacks:" << ss.eof() << std::endl;
     size_t i = 0;
-    while (!decompressed.eof()) {
-      loader.LoadOne(decompressed);
+    while (!ss.eof()) {
+      loader.LoadOne(ss);
       ++i;
     }
-    std::cout << "done loading packets:" << i << std::endl;
-    for (auto& [time, v] : cb_map) {
-      task_queue.push_back([v = std::move(v)](mkt::QsHandler& qs) {
+    for (auto& [exchTs, v] : cb_map) {
+      task_queue.emplace(exchTs, [v = std::move(v)](T& qs) {
         for (auto& cb : v.first) {
           cb(qs);
         }
@@ -174,13 +170,22 @@ void LoadQsBinFile(std::string fn) {
         }
       });
     }
-  }
+    std::cout << "done loading packets:" << i << std::endl;
+  
+  return task_queue;
+}
+
+void LoadQsBinFile(std::string fn) {
+  NanoLog::preallocate();
+  NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
+                                              : "/tmp/tmp.nanoclog");
+  const auto task_queue = LoadQsTaskQueue<mkt::QsHandler>(LoadBin(fn));
   std::cout << "start playback:" << task_queue.size() << std::endl;
   mkt::QsHandler qs_handler{};
   LOGINF(
       "seq_num,qs_send_time,exch_time,md_id,last_trade_maker_side,last_trade_"
       "time,last_trade_prc,last_trade_qty,bid_prc,bid_qty,ask_prc,ask_qty");
-  for (auto& cb : task_queue) {
+  for (auto& [_, cb] : task_queue) {
     cb(qs_handler);
   }
   std::cout << "done playback" << std::endl;
