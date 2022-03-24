@@ -3,6 +3,7 @@
 
 #include "ngh/data/qsbinhandler.h"
 #include "ngh/mkt/ftxhandler.h"
+#include "ngh/sim/Session.h"
 #include "ngh/types/types.h"
 #include "pybind11/pybind11.h"
 
@@ -59,13 +60,14 @@ PYBIND11_MODULE(pycc, m) {
 
   auto m_data = m_ngh.def_submodule("data");
   m_data.def("LoadQsBinFile", &ngh::data::LoadQsBinFile);
-  pybind11::class_<ngh::data::SortedBinLoader<ngh::mkt::QsHandler>>(
-      m_data, "SortedBinLoader")
+
+  auto m_sim = m_ngh.def_submodule("sim");
+  pybind11::class_<ngh::sim::SimSession>(m_sim, "SimSession")
       .def(pybind11::init<>())
-      .def("LoadQsBinFile",
-           &ngh::data::SortedBinLoader<ngh::mkt::QsHandler>::LoadQsBinFile)
-      .def("RunTaskQueue",
-           &ngh::data::SortedBinLoader<ngh::mkt::QsHandler>::RunTaskQueue);
+      .def("LoadQsBinFiles", &ngh::sim::SimSession::LoadQsBinFiles)
+      .def("Reset", &ngh::sim::SimSession::Reset)
+      .def("Setup", &ngh::sim::SimSession::Setup)
+      .def("Run", &ngh::sim::SimSession::Run);
 }
 
 }  // namespace pycc

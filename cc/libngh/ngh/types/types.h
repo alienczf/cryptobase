@@ -131,6 +131,8 @@ struct __attribute__((packed)) MsgTypeValue {
   }
 };
 
+enum MakerSide : uint8_t { X = 0, B = 1, S = 255 };
+
 enum MsgTypeId {
   SnapshotMsg,           // v1, v2, v3
   DeltaMsg,              // v1, v2, v3
@@ -192,20 +194,20 @@ struct __attribute__((packed)) Header {
 struct __attribute__((packed)) BookHdrV2 {
   int16_t n_bids, n_asks, num_levels;
   int32_t qs_latency;  // qs_send_time - qs_recv_time
-  SeqNum seqnum;
+  SeqNum seq_num;
   UnixTimeMicro qs_send_time, exch_time;
   MD_ID md_id;
   friend std::ostream& operator<<(std::ostream& os, const BookHdrV2& h) {
     os << "n_bids: " << h.n_bids << ", n_asks: " << h.n_asks
        << ", num_levels: " << h.num_levels << ", qs_latency: " << h.qs_latency
-       << ", seqnum: " << h.seqnum << ", qs_send_time: " << h.qs_send_time
+       << ", seq_num: " << h.seq_num << ", qs_send_time: " << h.qs_send_time
        << ", exch_time: " << h.exch_time << ", md_id: " << h.md_id;
     return os;
   }
 };
 
 struct __attribute__((packed)) TradeHdrV3 {
-  int8_t maker_side;
+  MakerSide maker_side;
   int16_t n_trades;
   int32_t qs_latency;  // qs_send_time - qs_recv_time
   UnixTimeMicro qs_send_time, exch_time;
@@ -220,7 +222,7 @@ struct __attribute__((packed)) TradeHdrV3 {
 };
 
 struct __attribute__((packed)) TradeV2 {
-  int8_t maker_side;
+  MakerSide maker_side;
   int32_t qs_latency;  // qs_send_time - qs_recv_time
   double prc, qty;
   UnixTimeMicro qs_send_time, exch_time;
@@ -273,6 +275,135 @@ struct __attribute__((packed)) FundingRateV3 {
     return os;
   }
 };
-}  // namespace data::alc
 
+struct Packet {
+  // TODO(ANY): remove constructor
+ public:
+  struct Trade {
+    double prc, qty;
+    MakerSide side;
+    friend std::ostream& operator<<(std::ostream& os, const Trade& t) {
+      os << "prc: " << t.prc << ", qty: " << t.qty << ", side" << t.side;
+      return os;
+    }
+  };
+
+  struct Level {
+    double prc, qty;
+    MakerSide side;
+    friend std::ostream& operator<<(std::ostream& os, const Level& l) {
+      os << "prc: " << l.prc << ", qty: " << l.qty << ", side" << l.side;
+      return os;
+    }
+  };
+  template <typename T>
+  static Packet MakePacket(T& stream) {
+    Packet p{};
+    static thread_local Header h{};
+    static thread_local BookHdrV2 bh{};
+    static thread_local PriceLevelV2 pl{};
+    static thread_local TradeHdrV3 th{};
+    static thread_local TradeV3 t3{};
+    static thread_local TradeV2 t2{};
+    static thread_local FundingRateV3 fr{};
+    stream.read(reinterpret_cast<char*>(&h), sizeof(Header));
+    p.filtered = h.filtered();
+    p.ts = h.ts;
+    p.exch = h.exch;
+    p.symbol = h.symbol;
+    switch (h.msg_type()) {
+      case SnapshotMsg: {
+        p.snapshot = true;
+      }
+      case DeltaMsg: {
+        stream.read(reinterpret_cast<char*>(&bh), sizeof(BookHdrV2));
+        p.qs_latency = bh.qs_latency;
+        p.qs_send_time = bh.qs_send_time;
+        p.exch_time = bh.exch_time;
+        p.md_id = bh.md_id;
+        p.seq_num = bh.seq_num;
+        for (int i = 0; i < bh.n_bids; ++i) {
+          stream.read(reinterpret_cast<char*>(&pl), sizeof(PriceLevelV2));
+          p.levels.push_back(
+              {pl.prc, (isnan(pl.qty) ? 0. : pl.qty), MakerSide::B});
+        }
+        for (int i = 0; i < bh.n_asks; ++i) {
+          stream.read(reinterpret_cast<char*>(&pl), sizeof(PriceLevelV2));
+          p.levels.push_back(
+              {pl.prc, (isnan(pl.qty) ? 0. : pl.qty), MakerSide::S});
+        }
+        break;
+      }
+      case TradeMsg: {
+        stream.read(reinterpret_cast<char*>(&t2), sizeof(TradeV2));
+        p.qs_latency = t2.qs_latency;
+        p.qs_send_time = t2.qs_send_time;
+        p.exch_time = t2.exch_time;
+        p.md_id = t2.md_id;
+        p.trades.push_back({t2.prc, t2.qty, t2.maker_side});
+        break;
+      }
+      case InferredTradeListMsg: {
+        p.inferred = true;
+      }
+      case TradeListMsg: {
+        stream.read(reinterpret_cast<char*>(&th), sizeof(TradeHdrV3));
+        p.qs_latency = th.qs_latency;
+        p.qs_send_time = th.qs_send_time;
+        p.exch_time = th.exch_time;
+        p.md_id = th.md_id;
+        const auto side = th.maker_side;
+        for (int i = 0; i < th.n_trades; ++i) {
+          stream.read(reinterpret_cast<char*>(&t3), sizeof(TradeV3));
+          p.trades.push_back({t3.prc, t3.qty, side});
+        }
+        break;
+      }
+      case FundingRateMsg: {
+        // TODO(ANY): add support
+        stream.read(reinterpret_cast<char*>(&fr), sizeof(FundingRateV3));
+        p.qs_latency = fr.qs_latency;
+        p.qs_send_time = fr.qs_send_time;
+        p.exch_time = fr.exch_time;
+        p.md_id = fr.md_id;
+        break;
+      }
+      default: {
+        stream.ignore(h.size());
+        LOGWRN("got unknown msgType");
+      }
+    }
+    return p;  // copy elision
+  }
+  std::vector<Trade> trades;
+  std::vector<Level> levels;
+  uint64_t ts;
+  UnixTimeMicro qs_send_time, exch_time;
+  MD_ID md_id;
+  SeqNum seq_num;
+  uint32_t qs_latency;
+  uint32_t symbol;
+  uint16_t exch;
+  bool snapshot{false};
+  bool filtered{false};
+  bool inferred{false};
+
+  friend std::ostream& operator<<(std::ostream& os, const Packet& p) {
+    os << "ts: " << p.ts << ", qs_send_time: " << p.qs_send_time
+       << ", exch_time: " << p.exch_time << ", md_id: " << p.md_id
+       << ", seq_num: " << p.seq_num << ", qs_latency: " << p.qs_latency
+       << ", symbol: " << p.symbol << ", exch: " << p.exch
+       << ", snapshot: " << p.snapshot << ", filtered: " << p.filtered
+       << ", inferred: " << p.inferred;
+    for (const auto& t : p.trades) {
+      os << ", trade: " << t;
+    }
+    for (const auto& l : p.levels) {
+      os << ", level: " << l;
+    }
+    return os;
+  }
+};
+
+}  // namespace data::alc
 }  // namespace ngh

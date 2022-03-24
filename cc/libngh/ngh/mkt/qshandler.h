@@ -10,76 +10,152 @@
 
 namespace ngh::mkt {
 using namespace data::alc;
-class QsHandler {
+
+class PktHandler {
  public:
-  QsHandler(UnixTimeMicro trade_agg_window = 10000)
-      : trade_agg_window(trade_agg_window) {
+  PktHandler() {
     LOGINF(
-        "seq_num,qs_send_time,exch_time,md_id,last_trade_maker_side,last_trade_"
-        "time,last_trade_prc,last_trade_qty,bid_prc,bid_qty,ask_prc,ask_qty");
+        "seq_num,qs_send_time,exch_time,md_id,upd_type,side,prc,qty,qtyDiff,"
+        "last_trade_maker_side,last_trade_time,last_trade_prc,last_trade_qty,"
+        "bid_prc,bid_qty,ask_prc,ask_qty");
+    Reset();
+  }
+  void Reset() {
+    seq_num = 0;
+    qs_send_time = 0;
+    exch_time = 0;
+    md_id = 0;
+    // book
+    last_book_time = 0;  // exchange time
+    levels[0].clear();
+    levels[1].clear();
+    // trade
+    last_trade_time = 0;  // exchange time
+    last_trade_maker_side = MakerSide::X;
+    last_trade_prc = NAN;
+    last_trade_qty = 0.;
   }
 
-  void OnLevel(const bool isBid, const data::alc::BookHdrV2& hdr,
-               const data::alc::PriceLevelV2& lvl) {
-    if ((hdr.seqnum >= seq_num) && (hdr.exch_time >= exch_time)) {
-      const auto idx = isBid ? 0 : 1;
-      if (isnan(lvl.qty) || (lvl.qty == 0.)) {
-        levels[idx].erase(lvl.prc);
-      } else {
-        levels[idx][lvl.prc] = lvl.qty;
-      }
-      md_id = hdr.md_id;
-      exch_time = std::max(exch_time, hdr.exch_time);
-      qs_send_time = std::max(qs_send_time, hdr.qs_send_time);
-      seq_num = std::max(seq_num, hdr.seqnum);
-    } else {
-      LOGINF("got stale price: current[%lu] received[%lu] md_id[%lu]",
-             exch_time, hdr.exch_time, hdr.md_id);
-    }
-  }
+  void OnPacket(const Packet& pkt) {
+    if (pkt.inferred || pkt.filtered ||
+        ((pkt.levels.size()) && ((pkt.seq_num <= seq_num))))
+      return;
+    if (pkt.snapshot) Reset();
 
-  void OnTrade(const MD_ID mdId, const UnixTimeMicro qsTs,
-               const UnixTimeMicro exchTs, uint8_t makerSide, Px prc, Qty qty) {
-    const bool continued_trade = ((last_trade_maker_side == makerSide) &&
-                                  (exchTs - exch_time < trade_agg_window));
-    const auto prev_qty = last_trade_qty;
-    last_trade_qty = qty + continued_trade * last_trade_qty;
-    last_trade_prc =
-        (prc * qty + continued_trade *
-                         (isnan(last_trade_prc) ? 0. : last_trade_prc) *
-                         prev_qty) /
-        last_trade_qty;
-    last_trade_maker_side = makerSide;
-    md_id = std::max(md_id, mdId);
-    // these updates could be stale
-    // TODO(ANY): retroactively shift this to l2 print
-    exch_time = std::max(exch_time, exchTs);
-    last_trade_time = std::max(last_trade_time, exchTs);
-    qs_send_time = std::max(qs_send_time, qsTs);
-    if (exchTs < exch_time) {
+    const bool bookSeq = (seq_num == 0) || (pkt.seq_num == seq_num + 1);
+    const bool bookFresh = pkt.exch_time > last_trade_time;
+    const bool trdFresh = pkt.exch_time > last_book_time;
+    if (!trdFresh && pkt.trades.size()) {
       LOGINF("got stale trade: current[%lu] received[%lu] md_id[%lu]",
-             exch_time, exchTs, mdId);
-    } else {
-      FlushBook(makerSide, prc, qty);
+             last_book_time, pkt.exch_time, pkt.md_id);
+    }
+
+    md_id = pkt.md_id;
+    exch_time = std::max(exch_time, pkt.exch_time);
+    qs_send_time = std::max(qs_send_time, pkt.qs_send_time);
+    seq_num = std::max(seq_num, pkt.seq_num);
+
+    if (pkt.levels.size()) {
+      last_book_time = std::max(pkt.exch_time, last_book_time);
+      if (bookSeq) {
+        if (bookFresh) {
+          for (const auto& lvl : pkt.levels) {
+            OnLevel(lvl);
+          }
+        } else {
+          LOGINF("got stale level: current[%lu] received[%lu] md_id[%lu]",
+                 last_trade_time, pkt.exch_time, pkt.md_id);
+        }
+      } else {
+        LOGWRN("got oos packet: current[%d] received[%d]", seq_num,
+               pkt.seq_num);
+      }
+    }
+
+    if (pkt.trades.size()) {
+      last_trade_time = std::max(pkt.exch_time, last_trade_time);
+      bool continued_trade = last_trade_time == pkt.exch_time;
+      for (const auto& trd : pkt.trades) {
+        OnTrade(trd, continued_trade);
+        continued_trade = true;
+      }
+      if (trdFresh) {
+        FlushBook(*pkt.trades.rbegin());
+      } else {
+        LOGINF("got stale trade: current[%lu] received[%lu] md_id[%lu]",
+               last_book_time, pkt.exch_time, pkt.md_id);
+      }
     }
   }
 
-  void OnTrade(const data::alc::TradeV2& t) {
-    OnTrade(t.md_id, t.qs_send_time, t.exch_time, t.maker_side, t.prc, t.qty);
+  void OnPacketUnsafe(const Packet& pkt) {
+    // TODO(ANY): protected + friend exchange only?
+    // no checks and etc.. only use if data is pre cleaned
+    seq_num = pkt.seq_num;
+    md_id = pkt.md_id;
+    exch_time = pkt.exch_time;
+    qs_send_time = pkt.qs_send_time;
+    for (const auto& lvl : pkt.levels) {
+      last_book_time = pkt.exch_time;
+      OnLevel(lvl);
+    }
+    bool continued_trade = last_trade_time == pkt.exch_time;
+    for (const auto& trd : pkt.trades) {
+      OnTrade(trd, continued_trade);
+      last_trade_time = pkt.exch_time;
+      continued_trade = true;
+    }
   }
 
-  void OnTrade(const data::alc::TradeHdrV3& hdr, const data::alc::TradeV3& t) {
-    OnTrade(hdr.md_id, hdr.qs_send_time, hdr.exch_time, hdr.maker_side, t.prc,
-            t.qty);
+  void OnLevel(const Packet::Level& lvl) {
+    const auto idx = lvl.side == MakerSide::B ? 0 : 1;
+    auto it = levels[idx].emplace(lvl.prc, 0).first;
+    const auto prevQty = it->second;
+    if (lvl.qty == 0.) {
+      levels[idx].erase(it);
+    } else {
+      it->second = lvl.qty;
+    }
+
+    if (levels[0].size() && levels[1].size()) {
+      const auto bid = levels[0].rbegin();
+      const auto ask = levels[1].begin();
+      LOGINF("%d,%lu,%lu,%lu,LVL,%d,%f,%f,%f,%d,%lu,%f,%f,%f,%f,%f,%f", seq_num,
+             qs_send_time, exch_time, md_id,
+             (lvl.side == MakerSide::B ? 1 : -1), lvl.prc, lvl.qty,
+             lvl.qty - prevQty, last_trade_maker_side, last_trade_time,
+             last_trade_prc, last_trade_qty, bid->first, bid->second,
+             ask->first, ask->second);
+    }
   }
 
-  void FlushBook(uint8_t makerSide, Px prc, Qty qty) {
-    if (makerSide > 0) {  // bids traded
-      for (auto it = levels[0].rbegin(); it != levels[0].rend(); ++it) {
-        if (it->first > prc) {  // bids higher than traded prices
+  void OnTrade(const Packet::Trade& trd, const bool continued_trade) {
+    const auto prev_qty = last_trade_qty;
+    last_trade_qty = trd.qty + continued_trade * last_trade_qty;
+    last_trade_prc =
+        (trd.prc * trd.qty + continued_trade *
+                                 (isnan(last_trade_prc) ? 0. : last_trade_prc) *
+                                 prev_qty) /
+        last_trade_qty;
+    last_trade_maker_side = trd.side;
+
+    if (levels[0].size() && levels[1].size()) {
+      const auto bid = levels[0].rbegin();
+      const auto ask = levels[1].begin();
+      LOGINF("%d,%lu,%lu,%lu,TRD,%d,%f,%f,%f,%d,%lu,%f,%f,%f,%f,%f,%f", seq_num,
+             qs_send_time, exch_time, md_id,
+             (trd.side == MakerSide::B ? 1 : -1), trd.prc, trd.qty, trd.qty,
+             last_trade_maker_side, last_trade_time, last_trade_prc,
+             last_trade_qty, bid->first, bid->second, ask->first, ask->second);
+    }
+  }
+
+  void FlushBook(const Packet::Trade& trd) {
+    if (trd.side == MakerSide::B) {  // bids traded
+      for (auto it = levels[0].rbegin(); it != levels[0].rend();) {
+        if (it->first > trd.prc) {  // bids higher than traded prices
           levels[0].erase(std::next(it).base());
-        } else if (it->first == prc) {
-          it->second -= qty;
+        } else if (it->first == trd.prc) {
           if (it->second <= 0.) {
             levels[0].erase(std::next(it).base());
           }
@@ -89,13 +165,13 @@ class QsHandler {
         }
       }
     } else {  // asks traded
-      for (auto it = levels[1].begin(); it != levels[1].end(); ++it) {
-        if (it->first < prc) {  // asks lower than traded prices
-          levels[0].erase(it);
-        } else if (it->first == prc) {
-          it->second -= qty;
+      for (auto it = levels[1].begin(); it != levels[1].end();) {
+        if (it->first < trd.prc) {  // asks lower than traded prices
+          it = levels[1].erase(it);
+        } else if (it->first == trd.prc) {
+          it->second -= trd.qty;
           if (it->second <= 0.) {
-            levels[0].erase(it);
+            levels[1].erase(it);
           }
           break;
         } else {
@@ -105,44 +181,19 @@ class QsHandler {
     }
   }
 
-  void OnFunding(const data::alc::FundingRateV3& fr) {
-    // TODO(ANY): implement
-    LOGDBG(
-        "FundingRateV3: qs_latency: %d, qs_send_time: %lu, "
-        "exch_time: %lu, md_id: %lu, current_funding_rate: %f, "
-        "current_funding_time: %lu, next_funding_rate: %f, "
-        "next_funding_time: %lu, index_price: %f, mark_price: %f",
-        fr.qs_latency, fr.qs_send_time, fr.exch_time, fr.md_id,
-        fr.current_funding_rate, fr.current_funding_time, fr.next_funding_rate,
-        fr.next_funding_time, fr.index_price, fr.mark_price);
-  }
-
-  void OnPacket() {
-    if (levels[0].size() && levels[1].size()) {
-      const auto bid = levels[0].rbegin();
-      const auto ask = levels[1].begin();
-      LOGINF("%d,%lu,%lu,%lu,%d,%lu,%f,%f,%f,%f,%f,%f", seq_num, qs_send_time,
-             exch_time, md_id, last_trade_maker_side, last_trade_time,
-             last_trade_prc, last_trade_qty, bid->first, bid->second,
-             ask->first, ask->second);
-    }
-  }
-
-  // config
-  const UnixTimeMicro trade_agg_window;
-
   // ordering
-  SeqNum seq_num{0};
-  UnixTimeMicro qs_send_time{0};
-  UnixTimeMicro exch_time{0};
-  MD_ID md_id{0};
+  SeqNum seq_num;
+  UnixTimeMicro qs_send_time;
+  UnixTimeMicro exch_time;
+  MD_ID md_id;
   // book
+  UnixTimeMicro last_book_time;  // exchange time
   PriceBook levels[2];
   // trade
-  int8_t last_trade_maker_side{true};
-  UnixTimeMicro last_trade_time{0};  // exchange time
-  Px last_trade_prc{NAN};
-  Qty last_trade_qty{0.};
+  UnixTimeMicro last_trade_time;  // exchange time
+  MakerSide last_trade_maker_side;
+  Px last_trade_prc;
+  Qty last_trade_qty;
 };
 
 }  // namespace ngh::mkt
