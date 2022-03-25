@@ -4,7 +4,7 @@
 #include "ngh/sim/SimTaskQueue.h"  // TODO(ANY): interface
 
 namespace ngh::sim {
-class SimAlgo : public SimQsSubscriberI {
+class SimAlgo : public SimQsSubscriberI, public SimTsSubscriberI {
  public:
   SimAlgo(SimTaskQueue& task_queue) : task_queue_(task_queue) {
     LOGINF(
@@ -15,6 +15,10 @@ class SimAlgo : public SimQsSubscriberI {
   void Reset() { qs_.Reset(); }
   void Setup() {}
 
+  virtual void OnFill(const SimFill&) final{};
+  virtual void OnOrder(const SimOrder&) final{};
+  virtual void OnAddRej(const SimOrder&, data::RejectReason) final{};
+  virtual void OnCxlRej(const SimOrder&, data::RejectReason) final{};
   virtual void OnPacket(const data::Packet& pkt) final {
     qs_.OnPacket(pkt);
     if (qs_.levels[0].size() && qs_.levels[1].size()) {

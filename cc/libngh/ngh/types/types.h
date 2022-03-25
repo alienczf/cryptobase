@@ -78,6 +78,46 @@ struct Ref {
 using Refs = std::vector<Ref>;
 
 namespace data::alc {
+
+enum RejectReason : uint8_t {
+  RejUnknown,
+  RejLimiterTimeout,
+  RejLimiterBlocked,
+  RejNonceError,
+  RejInsufficientFunds,
+  RejTooManyRequests,
+  RejHeavyLoad,
+  RejExchangeDown,
+  RejHTTP4xx,
+  RejHTTP5xx,
+  RejNetworkError,
+  RejOrderTimeout,
+  RejNotAccepting,
+  RejOrderNotFound,
+  RejOrderInQueue,
+  RejPendingSubmit,
+  RejPendingCancel,
+  RejOrderRejected,
+  RejOrderCanceled,
+  RejOrderFilled,
+  RejOrderDeleted,
+  RejInvalidOrderState,
+  RejRecentlyRejected,
+  RejDupClOrdId,
+  RejBug,
+  RejNotSupported,
+  RejPostOnlyRejected,
+  RejSTPRejected,
+  RejTooManyRequestsPerSymbol,
+  RejInvalidAPIAccessKey,
+  RejOrderPartiallyCanceled,
+  RejInSettlement,
+  RejMaintenance,
+  RejParameterError
+};
+
+enum OrderStatus : uint8_t { NEW, OPEN, DONE };
+
 using UnixTimeNano = int64_t;
 using UnixTimeMicro = int64_t;
 using UnixTimeMilli = int64_t;

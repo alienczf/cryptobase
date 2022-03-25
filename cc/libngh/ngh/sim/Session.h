@@ -61,12 +61,16 @@ class SimSession {
     // TODO(ANY): fetch latency config map
     algo_subs.push_back({task_queue});
     auto& algo = *algo_subs.rbegin();
+    if (auto it = ts_pubs.find({exch, symbol}); it != ts_pubs.end()) {
+      it->second.Subscribe(latency, algo);
+    } else {
+      LOGWRN("no ts_pubs for %d %d", symbol, exch);
+    }
     if (auto it = qs_pubs.find({exch, symbol}); it != qs_pubs.end()) {
       it->second.Subscribe(latency, algo);
     } else {
       LOGWRN("no qs_pubs for %d %d", symbol, exch);
     }
-    // TODO(ZF): exchange inhert ts pub and sub
   }
 
   void Run() { task_queue.RunUntilDone(); }

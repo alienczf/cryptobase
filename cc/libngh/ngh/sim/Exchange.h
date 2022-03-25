@@ -8,14 +8,7 @@
 
 namespace ngh::sim {
 using namespace data;
-class NoImpactExchange {
-  struct SimOrder {
-    uint64_t id;
-    Px prc;
-    Qty qty;
-    Qty queue;
-    uint8_t side;
-  };
+class NoImpactExchange : public SimTsPublisher {
   struct SimLevel {
     Px prc;
     std::vector<SimOrder> orders;
@@ -24,7 +17,7 @@ class NoImpactExchange {
 
  public:
   NoImpactExchange(SimTaskQueue& task_queue, std::vector<Packet> pkts)
-      : task_queue_(task_queue) {
+      : SimTsPublisher(task_queue), task_queue_(task_queue) {
     // copy the packets and manipulate
     // TODO(any): not too happy with the double copy here but ohwell
     std::sort(pkts.begin(), pkts.end(), [](const Packet& a, const Packet& b) {
@@ -49,7 +42,8 @@ class NoImpactExchange {
     }
   }
 
-  void Reset() {
+  virtual void Reset() final {
+    SimTsPublisher::Reset();
     qs_.Reset();
     pending_queue_.clear();
     sim_levels_[0].clear();
@@ -68,14 +62,14 @@ class NoImpactExchange {
           }
         }
         if (last_trd.qty > 0) {
-          flushSimLevels(last_trd);
+          handleTrade(last_trd);
         }
       });
     }
   }
 
  private:
-  void flushSimLevels(Packet::Trade trd) {
+  void handleTrade(Packet::Trade trd) {
     if (trd.side == MakerSide::B) {  // bids traded
       for (auto it = sim_levels_[0].rbegin(); it != sim_levels_[0].rend();
            ++it) {
