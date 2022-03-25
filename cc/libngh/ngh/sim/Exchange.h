@@ -1,5 +1,6 @@
 #pragma once
 #include <ngh/mkt/qshandler.h>
+#include <ngh/sim/Messaging.h>
 #include <ngh/sim/SimTaskQueue.h>
 
 #include <boost/circular_buffer.hpp>

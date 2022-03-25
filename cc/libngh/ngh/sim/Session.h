@@ -1,81 +1,18 @@
 #pragma once
 #include <ngh/data/qsbinhandler.h>
 #include <ngh/sim/Exchange.h>
+#include <ngh/sim/Messaging.h>
+#include <ngh/sim/SimAlgo.h>
 #include <ngh/sim/SimTaskQueue.h>
 
 #include <map>
 
 namespace ngh::sim {
 
-class SimTsSubscriberI {  // TODO(ANY): convert to concept
-  virtual void OnFill() = 0;
-  virtual void OnOrder() = 0;
-  virtual void OnAddAck() = 0;
-  virtual void OnAddRej() = 0;
-  virtual void OnCxlAck() = 0;
-  virtual void OnCxlRej() = 0;
-};
-
-class SimTsPublisher {
- public:
-  SimTsPublisher(SimTaskQueue& task_queue) : task_queue_(task_queue) {}
-  void Reset() { subs_.clear(); }
-  void Subscribe(UnixTimeMicro latency, SimTsSubscriberI&& sub) {
-    subs_.push_back({latency, sub});
-  }
-
-  template <typename... Args>
-  void OnFill(Args&&... args) {
-    for (auto& [lat, sub] : subs_) {
-      task_queue_.PostAt(task_queue_.Now() + lat, [&]() {
-        // sub.OnFill(std::forward<Args>(args)...);
-      });
-    }
-  }
-
- private:
-  SimTaskQueue& task_queue_;
-  std::vector<std::pair<data::UnixTimeMicro, SimTsSubscriberI&>> subs_;
-};
-
-class SimQsPublisher {
- public:
-  using DataCb = std::function<void(PriceBook*, std::vector<Packet::Trade>)>;
-  SimQsPublisher(SimTaskQueue& task_queue, std::vector<Packet> pkts)
-      : pkts_(pkts), task_queue_(task_queue) {}
-  void Reset() {
-    subs_.clear();
-    qs_.Reset();
-  }
-  void Subscribe(UnixTimeMicro latency, DataCb&& sub) {
-    subs_.push_back({latency, std::move(sub)});
-  }
-  void Setup() {
-    for (const auto& pkt : pkts_) {
-      task_queue_.PostAt(pkt.qs_send_time, [&]() {
-        qs_.OnPacket(pkt);
-        for (auto& [_, sub] : subs_) {
-          // TODO(ZF): implement latency
-          // will need to copy data.. sad =(
-          sub(qs_.levels, pkt.trades);
-        }
-      });
-    }
-  }
-
- private:
-  std::vector<Packet> pkts_;
-  mkt::PktHandler qs_;
-
-  // external refereces
-  SimTaskQueue& task_queue_;
-  std::vector<std::pair<data::UnixTimeMicro, DataCb>> subs_;
-};
-
 class SimSession {
  public:
-  void LoadQsBinFiles(std::vector<std::string> files, uint16_t exch = 0,
-                      uint32_t symbol = 0) {
+  void LoadQsBinFiles(std::vector<std::string> files, uint16_t exch,
+                      uint32_t symbol) {
     std::vector<Packet> pkts{};
     for (const auto& fn : files) {
       for (auto& pkt : LoadPacket(LoadBin(fn))) {
@@ -98,28 +35,45 @@ class SimSession {
   }
 
   void Reset() {
-    task_queue.clear();
+    task_queue.Reset();
     for (auto& [_, pub] : qs_pubs) {
       pub.Reset();
     }
     for (auto& [_, pub] : ts_pubs) {
       pub.Reset();
     }
+    algo_subs.clear();
   }
 
   void Setup() {
+    NanoLog::preallocate();
+    NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
+                                                : "/tmp/tmp.nanoclog");
     for (auto& [_, pub] : qs_pubs) {
       pub.Setup();
     }
     for (auto& [_, pub] : ts_pubs) {
       pub.Setup();
     }
+  }
+
+  void AddAlgo(uint16_t exch, uint32_t symbol, data::UnixTimeMicro latency) {
+    // TODO(ANY): fetch latency config map
+    algo_subs.push_back({task_queue});
+    auto& algo = *algo_subs.rbegin();
+    if (auto it = qs_pubs.find({exch, symbol}); it != qs_pubs.end()) {
+      it->second.Subscribe(latency, algo);
+    } else {
+      LOGWRN("no qs_pubs for %d %d", symbol, exch);
+    }
+    // TODO(ZF): exchange inhert ts pub and sub
   }
 
   void Run() { task_queue.RunUntilDone(); }
 
   std::map<std::pair<uint16_t, uint32_t>, NoImpactExchange> ts_pubs;
   std::map<std::pair<uint16_t, uint32_t>, SimQsPublisher> qs_pubs;
+  std::vector<SimAlgo> algo_subs;
   SimTaskQueue task_queue;
 };
 

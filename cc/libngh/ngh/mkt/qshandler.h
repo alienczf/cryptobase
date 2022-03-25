@@ -13,13 +13,7 @@ using namespace data::alc;
 
 class PktHandler {
  public:
-  PktHandler() {
-    LOGINF(
-        "seq_num,qs_send_time,exch_time,md_id,upd_type,side,prc,qty,qtyDiff,"
-        "last_trade_maker_side,last_trade_time,last_trade_prc,last_trade_qty,"
-        "bid_prc,bid_qty,ask_prc,ask_qty");
-    Reset();
-  }
+  PktHandler() { Reset(); }
   void Reset() {
     seq_num = 0;
     qs_send_time = 0;
@@ -110,22 +104,10 @@ class PktHandler {
   void OnLevel(const Packet::Level& lvl) {
     const auto idx = lvl.side == MakerSide::B ? 0 : 1;
     auto it = levels[idx].emplace(lvl.prc, 0).first;
-    const auto prevQty = it->second;
     if (lvl.qty == 0.) {
       levels[idx].erase(it);
     } else {
       it->second = lvl.qty;
-    }
-
-    if (levels[0].size() && levels[1].size()) {
-      const auto bid = levels[0].rbegin();
-      const auto ask = levels[1].begin();
-      LOGINF("%d,%lu,%lu,%lu,LVL,%d,%f,%f,%f,%d,%lu,%f,%f,%f,%f,%f,%f", seq_num,
-             qs_send_time, exch_time, md_id,
-             (lvl.side == MakerSide::B ? 1 : -1), lvl.prc, lvl.qty,
-             lvl.qty - prevQty, last_trade_maker_side, last_trade_time,
-             last_trade_prc, last_trade_qty, bid->first, bid->second,
-             ask->first, ask->second);
     }
   }
 
@@ -138,16 +120,6 @@ class PktHandler {
                                  prev_qty) /
         last_trade_qty;
     last_trade_maker_side = trd.side;
-
-    if (levels[0].size() && levels[1].size()) {
-      const auto bid = levels[0].rbegin();
-      const auto ask = levels[1].begin();
-      LOGINF("%d,%lu,%lu,%lu,TRD,%d,%f,%f,%f,%d,%lu,%f,%f,%f,%f,%f,%f", seq_num,
-             qs_send_time, exch_time, md_id,
-             (trd.side == MakerSide::B ? 1 : -1), trd.prc, trd.qty, trd.qty,
-             last_trade_maker_side, last_trade_time, last_trade_prc,
-             last_trade_qty, bid->first, bid->second, ask->first, ask->second);
-    }
   }
 
   void FlushBook(const Packet::Trade& trd) {

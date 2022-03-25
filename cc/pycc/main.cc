@@ -67,6 +67,7 @@ PYBIND11_MODULE(pycc, m) {
       .def("LoadQsBinFiles", &ngh::sim::SimSession::LoadQsBinFiles)
       .def("Reset", &ngh::sim::SimSession::Reset)
       .def("Setup", &ngh::sim::SimSession::Setup)
+      .def("AddAlgo", &ngh::sim::SimSession::AddAlgo)
       .def("Run", &ngh::sim::SimSession::Run);
 }
 

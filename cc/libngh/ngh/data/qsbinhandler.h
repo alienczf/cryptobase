@@ -42,9 +42,6 @@ static std::vector<Packet> LoadPacket(std::stringstream&& decompressed) {
 }
 
 static void LoadQsBinFile(const std::string& fn) {
-  NanoLog::preallocate();
-  NanoLog::setLogFile(std::getenv("LOG_FILE") ? std::getenv("LOG_FILE")
-                                              : "/tmp/tmp.nanoclog");
   mkt::PktHandler h{};
   for (auto& pkt : LoadPacket(LoadBin(fn))) {
     h.OnPacket(pkt);

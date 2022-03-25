@@ -9,7 +9,10 @@ namespace ngh::sim {
 class SimTaskQueue {
  public:
   using Task = std::function<void()>;
-  void clear() { task_queue_.clear(); }
+  void Reset() {
+    now_ = 0;
+    task_queue_.clear();
+  }
   void PostAt(data::UnixTimeMicro ts, Task&& cb) {
     ts = std::max(ts, now_ + 1);  // no timetravel
     while (task_queue_.find(ts) != task_queue_.end()) {
