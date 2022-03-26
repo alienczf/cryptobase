@@ -3,7 +3,6 @@
 #include <ngh/sim/Messaging.h>
 #include <ngh/sim/SimTaskQueue.h>
 
-#include <boost/circular_buffer.hpp>
 #include <map>
 
 namespace ngh::sim {
@@ -45,7 +44,6 @@ class NoImpactExchange : public SimTsPublisher {
   virtual void Reset() final {
     SimTsPublisher::Reset();
     qs_.Reset();
-    pending_queue_.clear();
     sim_levels_[0].clear();
     sim_levels_[1].clear();
   }
@@ -54,47 +52,91 @@ class NoImpactExchange : public SimTsPublisher {
     Reset();
     for (const auto& event : events_) {
       task_queue_.PostAt(event.begin()->qs_send_time, [&]() {
-        Packet::Trade last_trd{};
         for (const auto& pkt : event) {
           qs_.OnPacketUnsafe(pkt);
           for (const auto& trd : pkt.trades) {
-            last_trd = trd;
+            handleTrade(trd);
           }
         }
-        if (last_trd.qty > 0) {
-          handleTrade(last_trd);
-        }
+        syncQueue();
       });
     }
   }
 
  private:
+  void syncQueue() {
+    for (auto& [px, level] : sim_levels_[0]) {
+      Qty lvl_qty = 0.;
+      if (auto it = qs_.levels[0].find(px); it != qs_.levels[0].end()) {
+        lvl_qty = it->second;
+      }
+      for (auto& order : level.orders) {
+        order.queue = std::min(order.queue, lvl_qty);
+      }
+    }
+  }
+
   void handleTrade(Packet::Trade trd) {
     if (trd.side == MakerSide::B) {  // bids traded
       for (auto it = sim_levels_[0].rbegin(); it != sim_levels_[0].rend();
            ++it) {
+        auto& orders = it->second.orders;
         if (it->first > trd.prc) {  // bids higher than traded prices
-          sim_levels_[0].erase(std::next(it).base());
-          // } else if (it->first == trd.prc) {
-          //   it->second -= trd.qty;
-          //   if (it->second <= 0.) {
-          //     sim_levels_[0].erase(std::next(it).base());
-          //   }
-          //   break;
+          for (auto& o : orders) {
+            PubFill(o.FillOrder(o.qty));
+            PubOrder(o);
+          }
+          it = std::make_reverse_iterator(
+              sim_levels_[0].erase(std::next(it).base()));
+        } else if (it->first == trd.prc) {
+          for (auto oit = orders.rbegin();  // avoid invalidation
+               oit != orders.rend();) {
+            const auto fill_qty = oit->OnLevelTrade(trd.qty);
+            if (fill_qty > 0) {
+              PubFill(oit->FillOrder(fill_qty));
+              PubOrder(*oit);
+              if (oit->status == OrderStatus::DONE) {
+                orders.erase(std::next(oit).base());
+              }
+            } else {
+              ++oit;
+            }
+          }
+          if (!orders.size()) {
+            sim_levels_[0].erase(std::next(it).base());
+          }
+          break;
         } else {
           break;
         }
       }
     } else {  // asks traded
-      for (auto it = sim_levels_[1].begin(); it != sim_levels_[1].end(); ++it) {
+      for (auto it = sim_levels_[1].begin(); it != sim_levels_[1].end();) {
+        auto& orders = it->second.orders;
         if (it->first < trd.prc) {  // asks lower than traded prices
-          sim_levels_[0].erase(it);
-          // } else if (it->first == trd.prc) {
-          //   it->second -= trd.qty;
-          //   if (it->second <= 0.) {
-          //     sim_levels_[0].erase(it);
-          //   }
-          //   break;
+          for (auto& o : orders) {
+            PubFill(o.FillOrder(o.qty));
+            PubOrder(o);
+          }
+          it = sim_levels_[1].erase(it);
+        } else if (it->first == trd.prc) {
+          for (auto oit = orders.rbegin();  // avoid invalidation
+               oit != orders.rend();) {
+            const auto fill_qty = oit->OnLevelTrade(trd.qty);
+            if (fill_qty > 0) {
+              PubFill(oit->FillOrder(fill_qty));
+              PubOrder(*oit);
+              if (oit->status == OrderStatus::DONE) {
+                orders.erase(std::next(oit).base());
+              }
+            } else {
+              ++oit;
+            }
+          }
+          if (!orders.size()) {
+            sim_levels_[1].erase(it);
+          }
+          break;
         } else {
           break;
         }
@@ -110,9 +152,5 @@ class NoImpactExchange : public SimTsPublisher {
   // book
   mkt::PktHandler qs_;
   std::map<Px, SimLevel> sim_levels_[2];
-  // orderbook
-  boost::circular_buffer_space_optimized<
-      std::pair<UnixTimeMicro, std::function<void(NoImpactExchange&)>>>
-      pending_queue_{64};  // increase as needed
 };
 }  // namespace ngh::sim

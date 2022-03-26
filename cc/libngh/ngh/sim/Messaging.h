@@ -4,6 +4,14 @@
 
 namespace ngh::sim {
 
+struct SimFill {
+  uint64_t id;
+  Px prc;
+  Qty qty;  // always incremental
+  data::MakerSide side;
+  bool is_maker;
+};
+
 struct SimOrder {
   enum TIF : uint8_t { GTC, FAK, POST_ONLY };
   enum DONE_REASON : uint8_t {
@@ -16,24 +24,29 @@ struct SimOrder {
     DONE_REASON_RESET
   };
   uint64_t id;
-  uint64_t eid;
   Px prc;
   Qty qty;
-  Qty queue;
+  Qty queue;  // used by exchange to track qspot
   data::MakerSide side;
   TIF tif;
   data::OrderStatus status;
   DONE_REASON done_reason;
-};
 
-struct SimFill {
-  uint64_t id;
-  uint64_t eid;
-  Px prc;
-  Qty qty;  // always incremental
-  Qty queue;
-  data::MakerSide side;
-  bool is_maker;
+  SimFill FillOrder(const Qty fill_qty) {
+    qty -= std::min(fill_qty, qty);
+    if (qty == 0.) {
+      status = data::OrderStatus::DONE;
+      done_reason = DONE_REASON_FULLY_FILLED;
+    }
+    return {
+        .id = id, .prc = prc, .qty = fill_qty, .side = side, .is_maker = true};
+  }
+  Qty OnLevelTrade(const Qty trd_qty) {
+    const auto queue_trd = std::min(trd_qty, queue);
+    const auto fill_qty = trd_qty - queue_trd;
+    queue -= queue_trd;
+    return fill_qty;
+  }
 };
 
 class SimTsSubscriberI {  // TODO(ANY): convert to concept
@@ -53,16 +66,22 @@ class SimTsPublisher {
   void Subscribe(data::UnixTimeMicro latency, SimTsSubscriberI& sub) {
     subs_.push_back({latency, sub});
   }
+
 // boo macros.. but this is more readable than some template magic
-#define DEFINE_PUB_METHOD(msg)                                       \
-  template <typename... Args>                                        \
-  void Pub##msg(Args&&... args) {                                    \
-    for (auto& it : subs_) {                                         \
-      task_queue_.PostAt(task_queue_.Now() + it.first,               \
-                         [&sub = it.second, args...]() {             \
-                           sub.On##msg(std::forward<Args>(args)...); \
-                         });                                         \
-    }                                                                \
+// https://stackoverflow.com/questions/53033486/capturing-a-copy-of-parameter-pack
+#define DEFINE_PUB_METHOD(msg)                                                \
+  template <typename... Args>                                                 \
+  void Pub##msg(Args&&... args) {                                             \
+    for (auto& it : subs_) {                                                  \
+      task_queue_.PostAt(task_queue_.Now() + it.first,                        \
+                         [tup = std::make_tuple(std::forward<Args>(args)...), \
+                          &sub = it.second]() {                               \
+                           auto doPub = [&](auto&... params) {                \
+                             sub.On##msg(std::move(params)...);               \
+                           };                                                 \
+                           std::apply(doPub, tup);                            \
+                         });                                                  \
+    }                                                                         \
   }
   DEFINE_PUB_METHOD(Fill)
   DEFINE_PUB_METHOD(Order)

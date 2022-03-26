@@ -126,7 +126,8 @@ class PktHandler {
     if (trd.side == MakerSide::B) {  // bids traded
       for (auto it = levels[0].rbegin(); it != levels[0].rend();) {
         if (it->first > trd.prc) {  // bids higher than traded prices
-          levels[0].erase(std::next(it).base());
+          it =
+              std::make_reverse_iterator(levels[0].erase(std::next(it).base()));
         } else if (it->first == trd.prc) {
           if (it->second <= 0.) {
             levels[0].erase(std::next(it).base());
