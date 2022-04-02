@@ -27,10 +27,10 @@ add_compile_options(
   -Wcast-align
   -Wno-unknown-warning-option
   -Wno-unused-parameter
+  -Wno-unused-private-field
   -Wno-unused-result
   -Wno-missing-field-initializers
   -Wno-ambiguous-reversed-operator
-  -Wno-unused-parameter
   -Wno-unused-result
   # ...but not unused variables warning, as they can get annoying in release builds because asserts
   # get compiled out

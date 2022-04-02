@@ -132,6 +132,9 @@ using MD_ID = uint64_t;
 using SeqNum = int32_t;
 using VersionHdr = uint8_t;
 using FlagsHdr = uint8_t;
+using EXCHID = uint16_t;
+using SYMID = uint32_t;
+using Syms = std::vector<std::pair<EXCHID, SYMID>>;
 
 // bitfields
 struct __attribute__((packed)) StreamType {
@@ -191,8 +194,8 @@ struct __attribute__((packed)) Header {
   uint64_t ts;
   Version version;
   StreamType stream_type;
-  uint16_t exch;
-  uint32_t symbol;
+  EXCHID exch;
+  data::alc::SYMID symbol;
   MsgTypeValue _msg_type;
   uint8_t qs_type;
   uint16_t size() const { return _size - sizeof(Header); }
@@ -422,8 +425,8 @@ struct Packet {
   MD_ID md_id;
   SeqNum seq_num;
   uint32_t qs_latency;
-  uint32_t symbol;
-  uint16_t exch;
+  data::alc::SYMID symbol;
+  EXCHID exch;
   bool snapshot{false};
   bool filtered{false};
   bool inferred{false};
@@ -444,6 +447,8 @@ struct Packet {
     return os;
   }
 };
+
+using Pkts = std::vector<Packet>;
 
 }  // namespace data::alc
 }  // namespace ngh

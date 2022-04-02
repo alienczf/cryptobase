@@ -15,7 +15,7 @@
 namespace ngh::data {
 using namespace data::alc;
 
-static std::stringstream LoadBin(const std::string& filename) {
+static alc::Pkts LoadBin(const std::string& filename) {
   std::ifstream ifs(filename, std::ios::binary);
   if (!ifs) {
     throw std::runtime_error("failed to open file: " + filename);
@@ -27,11 +27,7 @@ static std::stringstream LoadBin(const std::string& filename) {
   output.push(ifs);
   std::stringstream decompressed;
   boost::iostreams::copy(output, decompressed);
-  return decompressed;
-}
-
-static std::vector<Packet> LoadPacket(std::stringstream&& decompressed) {
-  std::vector<Packet> pkts{};
+  alc::Pkts pkts{};
   size_t i = 0;
   while (!decompressed.eof()) {
     pkts.push_back(Packet::MakePacket(decompressed));
@@ -43,7 +39,7 @@ static std::vector<Packet> LoadPacket(std::stringstream&& decompressed) {
 
 static void LoadQsBinFile(const std::string& fn) {
   mkt::PktHandler h{};
-  for (auto& pkt : LoadPacket(LoadBin(fn))) {
+  for (auto& pkt : LoadBin(fn)) {
     h.OnPacket(pkt);
   }
 }

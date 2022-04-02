@@ -1,19 +1,40 @@
 #pragma once
+#include <variant>
+#include <vector>
+
 #include "ngh/mkt/qshandler.h"
 #include "ngh/sim/Messaging.h"
 #include "ngh/sim/SimTaskQueue.h"  // TODO(ANY): interface
 
 namespace ngh::sim {
-class SimAlgo : public SimQsSubscriberI, public SimTsSubscriberI {
+class ReplayAlgo : public SimQsSubscriberI, public SimTsSubscriberI {
  public:
-  SimAlgo(SimTaskQueue& task_queue) : task_queue_(task_queue) {
+  ReplayAlgo(SimTaskQueue& task_queue, SimTsPublisher& ts_pub,
+             const std::vector<SimReq>& reqs, data::UnixTimeMicro latency)
+      : task_queue_(task_queue),
+        ts_pub_(ts_pub),
+        reqs_(reqs),
+        latency_(latency) {
     LOGINF(
         "seq_num,qs_send_time,exch_time,md_id,upd_type,last_trade_maker_side,"
         "last_trade_time,last_trade_prc,last_trade_qty,bid_prc,bid_qty,ask_prc,"
         "ask_qty");
   }
   void Reset() { qs_.Reset(); }
-  void Setup() {}
+  void Setup() {
+    for (const auto& req : reqs_) {
+      switch (req.type) {
+        case SimReq::Type::SUBMIT: {
+          ts_pub_.ReqSubmit(req.submit, req.ts + latency_);
+          break;
+        }
+        case SimReq::Type::CANCEL: {
+          ts_pub_.ReqCancel(req.cancel, req.ts + latency_);
+          break;
+        }
+      }
+    }
+  }
 
   virtual void OnFill(const SimFill&) final{};
   virtual void OnOrder(const SimOrder&) final{};
@@ -33,9 +54,12 @@ class SimAlgo : public SimQsSubscriberI, public SimTsSubscriberI {
   }
 
  private:
-  mkt::PktHandler qs_;
-
   // external reference
   SimTaskQueue& task_queue_;
+  SimTsPublisher& ts_pub_;
+
+  mkt::PktHandler qs_;
+  Reqs reqs_;
+  data::UnixTimeMicro latency_;  // TODO hide this into interface
 };
 }  // namespace ngh::sim
