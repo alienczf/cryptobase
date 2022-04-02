@@ -4,6 +4,31 @@
 
 namespace ngh::sim {
 
+enum TIF : uint8_t { GTC = 0, FAK = 1, POST = 2 };
+struct SimReqSubmit {
+  TIF tif;
+  uint64_t oid;
+  data::MakerSide side;
+  Px prc;
+  Qty qty;
+};
+
+struct SimReqCancel {
+  uint64_t oid;
+  // not needed but we use this to speed up lookup
+  data::MakerSide side;
+  Px prc;
+};
+
+struct SimReq {
+  enum Type : uint8_t { SUBMIT = 0, CANCEL = 1 };
+  Type type;
+  data::UnixTimeMicro ts;
+  SimReqSubmit submit;
+  SimReqCancel cancel;
+};
+using Reqs = std::vector<SimReq>;
+
 struct SimFill {
   uint64_t id;
   Px prc;
@@ -13,13 +38,13 @@ struct SimFill {
 };
 
 struct SimOrder {
-  enum TIF : uint8_t { GTC, FAK, POST_ONLY };
   enum DONE_REASON : uint8_t {
     DONE_REASON_NONE,
     DONE_REASON_CANCEL,
     DONE_REASON_COD,
     DONE_REASON_STP,
     DONE_REASON_POST_ONLY,
+    DONE_REASON_FAK,
     DONE_REASON_FULLY_FILLED,
     DONE_REASON_RESET
   };
@@ -61,11 +86,16 @@ class SimTsSubscriberI {  // TODO(ANY): convert to concept
 class SimTsPublisher {
  public:
   SimTsPublisher(SimTaskQueue& task_queue) : task_queue_(task_queue) {}
+  virtual ~SimTsPublisher() = default;
   virtual void Setup(){};
   virtual void Reset() { subs_.clear(); }
   void Subscribe(data::UnixTimeMicro latency, SimTsSubscriberI& sub) {
     subs_.push_back({latency, sub});
   }
+
+  // TODO(ANY): need to inject latency here
+  virtual void ReqSubmit(const SimReqSubmit&, const data::UnixTimeMicro) = 0;
+  virtual void ReqCancel(const SimReqCancel&, const data::UnixTimeMicro) = 0;
 
 // boo macros.. but this is more readable than some template magic
 // https://stackoverflow.com/questions/53033486/capturing-a-copy-of-parameter-pack
